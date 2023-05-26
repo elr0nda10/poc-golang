@@ -2,6 +2,7 @@ package singleflight
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -166,4 +167,29 @@ func TestDb_Select(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDb_Race(t *testing.T) {
+	db := NewDb(0)
+	testData := []keyValueTest{
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+	}
+	wg := sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		for _, test := range testData {
+			wg.Add(2)
+			go func(test keyValueTest) {
+				defer wg.Done()
+				_ = db.Insert(test.key, test.val)
+			}(test)
+			go func(test keyValueTest) {
+				defer wg.Done()
+				_, _ = db.Select(test.key)
+			}(test)
+		}
+	}
+
+	wg.Wait()
 }

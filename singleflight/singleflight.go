@@ -3,6 +3,7 @@ package singleflight
 import (
 	"errors"
 	"golang.org/x/sync/singleflight"
+	"sync"
 )
 
 var (
@@ -21,6 +22,7 @@ type SingleFlightPoC struct {
 	cache *Cache
 	sf    singleflight.Group
 	stat  SFStats
+	mu    sync.RWMutex
 }
 
 func NewSingleFlightPoC(db *Db, c *Cache) *SingleFlightPoC {
@@ -32,7 +34,7 @@ func NewSingleFlightPoC(db *Db, c *Cache) *SingleFlightPoC {
 
 func (s *SingleFlightPoC) Get(key string) (string, error) {
 	if v, errCache := s.cache.Get(key); errCache == nil {
-		s.stat.cacheHit++
+		s.cacheHitInc()
 		switch v[0] {
 		case 'S':
 			return v[2:], nil
@@ -41,10 +43,10 @@ func (s *SingleFlightPoC) Get(key string) (string, error) {
 		}
 		return "", ErrNotExist
 	}
-	s.stat.cacheMiss++
+	s.cacheMissInc()
 
 	v, err, _ := s.sf.Do(key, func() (interface{}, error) {
-		s.stat.dbHit++
+		s.dbHitInc()
 		return s.db.Select(key)
 	})
 
@@ -57,6 +59,26 @@ func (s *SingleFlightPoC) Get(key string) (string, error) {
 	return v.(string), err
 }
 
+func (s *SingleFlightPoC) cacheHitInc() {
+	s.mu.Lock()
+	s.stat.cacheHit++
+	s.mu.Unlock()
+}
+
+func (s *SingleFlightPoC) cacheMissInc() {
+	s.mu.Lock()
+	s.stat.cacheMiss++
+	s.mu.Unlock()
+}
+
+func (s *SingleFlightPoC) dbHitInc() {
+	s.mu.Lock()
+	s.stat.dbHit++
+	s.mu.Unlock()
+}
+
 func (s *SingleFlightPoC) getStats() SFStats {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	return s.stat
 }

@@ -175,5 +175,4 @@ func testBurstTraffic(t *testing.T) {
 		cacheMiss: 4 * 5,
 		dbHit:     4 * 1,
 	}, sfTest.getStats(), t)
-
 }

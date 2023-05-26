@@ -2,6 +2,7 @@ package singleflight
 
 import (
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -124,4 +125,33 @@ func TestCache_Clear(t *testing.T) {
 	if !cache.eqInternalData(expectedData) {
 		t.Fatalf("expecting value to be %v but got %v", expectedData, cache.data)
 	}
+}
+
+func TestCache_Race(t *testing.T) {
+	cache := NewCache()
+	testData := []keyValueTest{
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+	}
+	wg := sync.WaitGroup{}
+	for i := 0; i < 100; i++ {
+		for _, test := range testData {
+			wg.Add(3)
+			go func(test keyValueTest) {
+				defer wg.Done()
+				cache.Set(test.key, test.val)
+			}(test)
+			go func(test keyValueTest) {
+				defer wg.Done()
+				_, _ = cache.Get(test.key)
+			}(test)
+			go func(test keyValueTest) {
+				defer wg.Done()
+				cache.Clear()
+			}(test)
+		}
+	}
+
+	wg.Wait()
 }
