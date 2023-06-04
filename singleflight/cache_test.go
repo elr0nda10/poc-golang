@@ -2,51 +2,72 @@ package singleflight
 
 import (
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 )
 
+func (c *Cache) test_internalDataStructure(expectedVal map[string]string, t *testing.T) {
+	defer c.mu.Unlock()
+	c.mu.Lock()
+	if isEq := reflect.DeepEqual(c.data, expectedVal); !isEq {
+		t.Fatalf("expecting total data %v but got %v", expectedVal, c.data)
+	}
+}
+
 func TestCache_Set(t *testing.T) {
 	tests := []struct {
-		name  string
-		input []keyValueTest
-		data  map[string]string
+		name     string
+		input    []testKeyValue
+		expected testExpectedOutput
 	}{{
 		name: "Insert 1 data",
-		input: []keyValueTest{
+		input: []testKeyValue{
 			{"k1", "v1"},
 		},
-		data: map[string]string{
-			"k1": "v1",
+		expected: testExpectedOutput{
+			Val: map[string]string{
+				"k1": "v1",
+			},
+			Err: nil,
 		},
 	}, {
 		name: "Insert 2 datas",
-		input: []keyValueTest{
+		input: []testKeyValue{
 			{"k1", "v1"},
 			{"k2", "v2"},
 		},
-		data: map[string]string{
-			"k1": "v1",
-			"k2": "v2",
+		expected: testExpectedOutput{
+			Val: map[string]string{
+				"k1": "v1",
+				"k2": "v2",
+			},
+			Err: nil,
 		},
 	}, {
 		name: "Insert 2 datas with same key",
-		input: []keyValueTest{
+		input: []testKeyValue{
 			{"k1", "v1"},
 			{"k1", "v2"},
 		},
-		data: map[string]string{
-			"k1": "v2",
+		expected: testExpectedOutput{
+			Val: map[string]string{
+				"k1": "v2",
+			},
+			Err: nil,
 		},
 	}, {
 		name: "Insert 2 datas with same value",
-		input: []keyValueTest{
+		input: []testKeyValue{
 			{"k1", "v1"},
 			{"k2", "v1"},
 		},
-		data: map[string]string{
-			"k1": "v1",
-			"k2": "v1",
+		expected: testExpectedOutput{
+			Val: map[string]string{
+				"k1": "v1",
+				"k2": "v1",
+			},
+			Err: nil,
 		},
 	}}
 
@@ -54,57 +75,59 @@ func TestCache_Set(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			cache := NewCache()
 			for _, ti := range test.input {
-				cache.Set(ti.key, ti.val)
+				cache.Set(ti.Key, ti.Val)
 			}
 
-			contentEq := cache.eqInternalData(test.data)
-			if !contentEq {
-				t.Fatalf("expecting total data %v but got %v", test.data, cache.data)
-			}
+			cache.test_internalDataStructure(test.expected.Val.(map[string]string), t)
 		})
 	}
 }
 
 func TestCache_Get(t *testing.T) {
 	cache := NewCache()
-	for _, testData := range []keyValueTest{
+	for _, testData := range []testKeyValue{
 		{"k1", "v1"},
 		{"k2", "v2"},
 		{"k1", "v3"},
 	} {
-		cache.Set(testData.key, testData.val)
+		cache.Set(testData.Key, testData.Val)
 	}
 
 	tests := []struct {
-		name          string
-		input         string
-		expected      string
-		expectedError error
+		name     string
+		input    string
+		expected testExpectedOutput
 	}{{
-		name:          "element exist",
-		input:         "k2",
-		expected:      "v2",
-		expectedError: nil,
+		name:  "element exist",
+		input: "k2",
+		expected: testExpectedOutput{
+			Val: "v2",
+			Err: nil,
+		},
 	}, {
-		name:          "duplicate key should return latest data",
-		input:         "k1",
-		expected:      "v3",
-		expectedError: nil,
+		name:  "duplicate key should return latest data",
+		input: "k1",
+		expected: testExpectedOutput{
+			Val: "v3",
+			Err: nil,
+		},
 	}, {
-		name:          "element not exist should return ErrNotExist",
-		input:         "k5",
-		expected:      "",
-		expectedError: ErrNotExist,
+		name:  "element not exist should return ErrNotExist",
+		input: "k5",
+		expected: testExpectedOutput{
+			Val: "",
+			Err: ErrNotExist,
+		},
 	}}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			res, err := cache.Get(test.input)
-			if !errors.Is(err, test.expectedError) {
-				t.Fatalf("expected error to be %v but got %v", test.expectedError, err)
+			if !errors.Is(err, test.expected.Err) {
+				t.Fatalf("expected error to be %v but got %v", test.expected.Err, err)
 			}
-			if err == nil && res != test.expected {
-				t.Fatalf("expected value to be %v but got %v", test.expected, res)
+			if err == nil && res != test.expected.Val {
+				t.Fatalf("expected value to be %v but got %v", test.expected.Val, res)
 			}
 		})
 	}
@@ -112,44 +135,50 @@ func TestCache_Get(t *testing.T) {
 
 func TestCache_Clear(t *testing.T) {
 	cache := NewCache()
-	for _, testData := range []keyValueTest{
+	for _, testData := range []testKeyValue{
 		{"k1", "v1"},
 		{"k2", "v2"},
 		{"k1", "v3"},
 	} {
-		cache.Set(testData.key, testData.val)
+		cache.Set(testData.Key, testData.Val)
 	}
 
 	cache.Clear()
-	expectedData := map[string]string{}
-	if !cache.eqInternalData(expectedData) {
-		t.Fatalf("expecting value to be %v but got %v", expectedData, cache.data)
-	}
+	cache.test_internalDataStructure(map[string]string{}, t)
 }
 
 func TestCache_Race(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("expected to not race but got race instead")
+		}
+	}()
+
 	cache := NewCache()
-	testData := []keyValueTest{
+	testData := []testKeyValue{
 		{"k1", "v1"},
 		{"k2", "v2"},
 		{"k3", "v3"},
 	}
 	wg := sync.WaitGroup{}
+	fnCacheSet := func(test testKeyValue) {
+		defer wg.Done()
+		cache.Set(test.Key, test.Val)
+	}
+	fnCacheGet := func(test testKeyValue) {
+		defer wg.Done()
+		_, _ = cache.Get(test.Key)
+	}
+	fnCacheClear := func(test testKeyValue) {
+		defer wg.Done()
+		cache.Clear()
+	}
 	for i := 0; i < 100; i++ {
 		for _, test := range testData {
 			wg.Add(3)
-			go func(test keyValueTest) {
-				defer wg.Done()
-				cache.Set(test.key, test.val)
-			}(test)
-			go func(test keyValueTest) {
-				defer wg.Done()
-				_, _ = cache.Get(test.key)
-			}(test)
-			go func(test keyValueTest) {
-				defer wg.Done()
-				cache.Clear()
-			}(test)
+			go fnCacheSet(test)
+			go fnCacheGet(test)
+			go fnCacheClear(test)
 		}
 	}
 

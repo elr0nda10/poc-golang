@@ -1,7 +1,6 @@
 package singleflight
 
 import (
-	"reflect"
 	"sync"
 )
 
@@ -36,10 +35,4 @@ func (c *Cache) Clear() {
 	c.mu.Lock()
 	c.data = make(map[string]string)
 	c.mu.Unlock()
-}
-
-func (c *Cache) eqInternalData(e map[string]string) bool {
-	defer c.mu.Unlock()
-	c.mu.Lock()
-	return reflect.DeepEqual(c.data, e)
 }
